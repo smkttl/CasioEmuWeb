@@ -1,0 +1,12 @@
+node_modules/
+dist/
+playwright-report/
+test-results/
+.vite/
+*.tsbuildinfo
+src/core/generated/
+.core-build/
+public/core/
+emsdk/
+.DS_Store
+*.log

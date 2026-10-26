@@ -1,0 +1,229 @@
+#pragma once
+#include "Config.hpp"
+
+#include "InterruptSource.hpp"
+#include "MMURegion.hpp"
+
+#include "Peripheral/ExternalInterrupts.hpp"
+#include "Peripheral/IOPorts.hpp"
+#ifdef CASIOEMU_REACT_CORE
+#include "ReactCore/sdl_shim.h"
+#else
+#include <SDL.h>
+#endif
+#include <condition_variable>
+#include <forward_list>
+#include <functional>
+#include <iosfwd>
+#include <mutex>
+#include <span>
+#include <string>
+#include <thread>
+#include <vector>
+
+namespace casioemu {
+	class Emulator;
+	class CPU;
+	class MMU;
+	class Peripheral;
+
+	class Chipset {
+		enum InterruptIndex {
+			INT_CHECKFLAG,
+			INT_RESET,
+			INT_BREAK,
+			INT_EMULATOR,
+			INT_NONMASKABLE,
+			INT_MASKABLE,
+			INT_SOFTWARE = 64,
+			INT_COUNT = 128
+		};
+
+	public:
+		enum RunMode {
+			RM_STOP,
+			RM_HALT,
+			RM_RUN,
+			RM_DEEP_HALT,
+			RM_HALT_H
+		};
+		RunMode run_mode;
+
+	private:
+		std::forward_list<Peripheral*> peripherals;
+
+		/**
+		 * A bunch of internally used methods for encapsulation purposes.
+		 */
+		size_t pending_interrupt_count;
+		bool interrupts_active[INT_COUNT];
+		void AcceptInterrupt();
+		void EnterStandby(RunMode mode);
+		bool HasWakeRequest(RunMode mode) const;
+		void LoadStateUnchecked(std::istream& is);
+		bool AdvanceStandbyWake();
+		uint64_t standby_wake_ticks = 0;
+		template<typename Transfer>
+		void TransferTiState(Transfer transfer) {
+			transfer(run_mode, standby_wake_ticks, data_int_mask, data_int_pending,
+				interrupts_active, pending_interrupt_count, isMIBlocked,
+				data_FCON, data_FCON1, data_LTBR, data_HTBR, data_LTBADJ,
+				ClockDiv, LSCLKMode, LSCLKTickCounter, HSCLKTickCounter,
+				HSCLKTimeCounter, SYSCLKTickCounter, LSCLKTimeCounter,
+				LSCLKThresh, LSCLKFreqAddition, LSCLK_output, HSCLK_output,
+				LSCLKTick, HSCLKTick, SYSCLKTick, OSCLKTick, LTBCReset, HTBCReset,
+				tiKey, tiDiagMode, SegmentAccess, remap);
+		}
+		void RaiseSoftware(size_t index);
+
+		void ConstructPeripherals();
+		void DestructPeripherals();
+		void SetupEpsCpu();
+
+		void ConstructClockGenerator();
+		void GenerateTickForClock();
+		void ResetClockGenerator();
+		void DestructClockGenerator();
+
+		void ConstructInterruptSFR();
+		void ResetInterruptSFR();
+		void DestructInterruptSFR();
+		MMURegion region_int_mask, region_int_pending;
+		uint64_t data_int_mask, data_int_pending;
+		static const size_t managed_interrupt_base = 4;
+
+		MMURegion region_BLKCON;
+
+		MMURegion region_FCON, region_FCON1, region_LTBR, region_HTBR, region_LTBADJ;
+		int LSCLKFreq{};
+
+		long long LSCLKTickCounter{}, HSCLKTickCounter, HSCLKTimeCounter, SYSCLKTickCounter, LSCLKTimeCounter, LSCLKThresh;
+		int LSCLKFreqAddition{};
+
+		bool real_hardware;
+		std::thread eps_ram_save_thread;
+		std::mutex eps_ram_save_thread_mutex;
+		std::condition_variable eps_ram_save_thread_cv;
+		bool eps_ram_save_thread_stop{};
+		/* Serializes PersistEpsRam with other RAM operations and teardown. */
+		std::mutex eps_ram_save_mutex;
+
+	public:
+		void* QueryInterface(const char* name);
+		Chipset(Emulator& emulator);
+		void Setup(); // must be called after emulator.hardware_id is initialized
+		~Chipset();
+
+		Emulator& emulator;
+		CPU& cpu;
+		MMU& mmu;
+		class ePSCPU* epscpu = 0;
+		class T4xCore* t4x = nullptr;
+		void RunTiMultiViewFrame();
+		bool StepTiMultiView(unsigned instructions = 1);
+
+		std::vector<unsigned char> rom_data;
+		std::vector<unsigned char> flash_data;
+
+		bool remap = false;
+
+		InterruptSource* MaskableInterrupts = nullptr;
+		size_t EffectiveMICount = 0;
+
+		// Reserve these pointers to make it easy for other peripherals to input to pins.
+		IOPorts* ioport = nullptr;
+		ExternalInterrupts* EXIhandle = nullptr;
+
+		bool WDT_enabled = false;
+
+		uint8_t data_BLKCON, BLKCON_mask;
+		uint8_t data_EXICON;
+
+		uint8_t data_FCON, data_FCON1, data_LTBR, data_HTBR;
+		uint16_t data_LTBADJ;
+
+		// 0.5Hz-64Hz Low Speed Clock output.Corresponding bit is set to 1 on output and got reset on the next LSCLK tick.
+		uint8_t LSCLK_output;
+
+		// 64Hz-8kHz output.
+		uint8_t HSCLK_output;
+
+		int ClockDiv;
+		bool LSCLKMode;
+
+		bool LSCLKTick, HSCLKTick, SYSCLKTick;
+		bool OSCLKTick = false;
+		bool LTBCReset, HTBCReset;
+
+		const int HTBROutputCount = 128;
+
+		/*
+		 * Pin levels.0 for L level, 1 for H level.
+		 * The external interrupts are controlled by Keyboard and ExternalInterrupts.These values could still be accessed by other peripherals.
+		 * P00 should be used as keyboard ki/ko.
+		 * We dont know the name of the port controlled by F220h.
+		 */
+		bool Port0Inputlevel[3], Port1Inputlevel[7];			 // The actual pin level inputted to the chip
+		bool Port0Outputlevel[3], Port1Outputlevel[7];			 // The pin level that could be directly read from the pins
+		bool UserInput_level_Port0[3], UserInput_level_Port1[7]; // The voltage attached directly to the pins
+		bool UserInput_state_Port0[3], UserInput_state_Port1[7]; // Marks if there is user input
+
+		bool SegmentAccess;
+
+		bool isMIBlocked;
+
+		// TI things.
+		bool tiDiagMode;
+		int tiKey;
+
+		/**
+		 * This exists because the Emulator that owns this Chipset is not ready
+		 * to supply a ROM path upon construction. It has to call `LoadROM` later
+		 * in its constructor.
+		 */
+		void SetupInternals();
+
+		/**
+		 * See 1.3.7 in the nX-U8 manual.
+		 */
+		void Reset();
+		void Break();
+		void Halt();
+		void DeepHalt();
+		void HaltH();
+		void Stop();
+		bool GetRunningState();
+		void RaiseEmulator();
+		void RequestNonmaskable();
+		void RaiseNonmaskable();
+		void ResetNonmaskable();
+		void RaiseMaskable(size_t index);
+		void ResetMaskable(size_t index);
+		void SetInterruptPendingSFR(size_t index, bool val);
+		bool GetInterruptPendingSFR(size_t index);
+		void InputToPort(int, int, bool);
+		void RemovePortInput(int, int);
+
+		void Tick();
+		bool RunEpsFrame(uint32_t idle_timer_cycles = 0);
+		void EmulatorTick();
+		void Frame();
+		void UIEvent(SDL_Event event);
+		void SaveStateAll(std::ostream& os);
+		void LoadStateAll(std::istream& is);
+		void PersistEpsRam();
+		bool ReloadRom(std::string& error);
+		bool WriteTiCode(size_t address, std::span<const uint8_t> bytes);
+		std::function<void()> on_rom_changed;
+
+		template <typename T>
+		T* QueryInterface() {
+			auto i = this->QueryInterface(typeid(T).name());
+			if (i)
+				return (T*)i;
+			return nullptr;
+		}
+
+		friend class CPU;
+	};
+} // namespace casioemu
