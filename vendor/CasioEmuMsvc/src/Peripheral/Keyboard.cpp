@@ -220,6 +220,9 @@ namespace casioemu {
 				keyboard_map[static_cast<SDL_Keycode>(keycode)] = static_cast<size_t>(button_index);
 			}
 		}
+		void UnbindKeycode(int keycode) override {
+			keyboard_map.erase(static_cast<SDL_Keycode>(keycode));
+		}
 		void HandleKeycode(int keycode, bool pressed) override {
 			auto iterator = keyboard_map.find(static_cast<SDL_Keycode>(keycode));
 			if (iterator == keyboard_map.end()) return;

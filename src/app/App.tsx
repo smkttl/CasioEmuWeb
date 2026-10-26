@@ -185,6 +185,9 @@ export function App() {
           onReset={() => void session.reset()}
           onPress={session.press}
           onReleaseAll={session.releaseAll}
+          keyBindings={session.keyBindings}
+          onSetKeyBinding={session.setKeyBinding}
+          onResetKeyBinding={session.resetKeyBinding}
         />
         <Debugger
           key={`${active.id}-${session.sessionKey}`}

@@ -1186,6 +1186,14 @@ int casioemu_core_bind_sdl_key(int keycode, int kiko) {
 	return 0;
 }
 
+int casioemu_core_unbind_sdl_key(int keycode) {
+	if (!g_emulator) return 1;
+	auto keyboard = g_emulator->chipset.QueryInterface<casioemu::IKeyboardAutomation>();
+	if (!keyboard) return 2;
+	keyboard->UnbindKeycode(keycode);
+	return 0;
+}
+
 int casioemu_core_set_display_color(int r, int g, int b) {
 	g_display_r = static_cast<uint8_t>(std::clamp(r, 0, 255));
 	g_display_g = static_cast<uint8_t>(std::clamp(g, 0, 255));

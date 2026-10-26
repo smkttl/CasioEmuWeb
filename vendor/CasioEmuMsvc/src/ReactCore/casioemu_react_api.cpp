@@ -638,6 +638,13 @@ int ce_bind_key(int keycode, int kiko) {
 	return 0;
 }
 
+int ce_unbind_key(int keycode) {
+	auto* keyboard = Keyboard();
+	if (!keyboard) return -1;
+	keyboard->UnbindKeycode(keycode);
+	return 0;
+}
+
 int ce_handle_key(int keycode, int pressed) {
 	auto* keyboard = Keyboard();
 	if (!keyboard) return -1;

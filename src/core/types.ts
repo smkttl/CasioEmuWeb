@@ -234,6 +234,7 @@ export interface EmulatorCore {
   readonly coreReady: boolean;
   loadModel(record: ModelRecord): Promise<void>;
   bindKey(code: string, kiko: number): void;
+  unbindKey(code: string): void;
   handleKey(code: string, pressed: boolean): boolean;
   start(): Promise<void>;
   pause(paused: boolean): void;

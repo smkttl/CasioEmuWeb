@@ -28,6 +28,7 @@ int ce_is_paused(void);
 int ce_set_key(int kiko, int pressed);
 void ce_release_all(void);
 int ce_bind_key(int keycode, int kiko);
+int ce_unbind_key(int keycode);
 int ce_handle_key(int keycode, int pressed);
 
 int ce_read_memory(uint32_t address, int length, uint8_t* out);

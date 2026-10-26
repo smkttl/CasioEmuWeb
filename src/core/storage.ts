@@ -1,5 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import { deserializeModelFiles, serializeModelFiles } from "./import";
+import type { KeyBindingOverrides } from "./keyBindings";
 import type { ModelRecord, SnapshotNode, StoredModelRecord } from "./types";
 
 const DB_NAME = "casio-emu-web";
@@ -141,6 +142,30 @@ export async function getSetting<T>(key: string, fallback: T): Promise<T> {
 export async function setSetting<T>(key: string, value: T): Promise<void> {
   const db = await database();
   await db.put("settings", { key, value }, key);
+}
+
+function keyBindingSetting(modelId: string) {
+  return `keyBindings:${modelId}`;
+}
+
+export async function getKeyBindingOverrides(
+  modelId: string,
+): Promise<KeyBindingOverrides> {
+  const value = await getSetting<KeyBindingOverrides>(keyBindingSetting(modelId), {});
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string | null] =>
+        typeof entry[1] === "string" || entry[1] === null,
+    ),
+  );
+}
+
+export async function saveKeyBindingOverrides(
+  modelId: string,
+  overrides: KeyBindingOverrides,
+): Promise<void> {
+  await setSetting(keyBindingSetting(modelId), overrides);
 }
 
 export async function clearAllData(): Promise<void> {

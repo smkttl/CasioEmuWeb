@@ -21,6 +21,8 @@ namespace casioemu {
 		virtual void PressCode(uint8_t code, bool pressed) = 0;
 		/// Bind and drive buttons through SDL keycode semantics for headless web input.
 		virtual void BindKeycode(int keycode, uint8_t code) = 0;
+		/// Remove any button mapping for a physical key.
+		virtual void UnbindKeycode(int keycode) = 0;
 		virtual void HandleKeycode(int keycode, bool pressed) = 0;
 	};
 } // namespace casioemu

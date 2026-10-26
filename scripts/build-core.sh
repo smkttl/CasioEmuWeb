@@ -157,7 +157,7 @@ build() {
       "_ce_shutdown","_ce_start","_ce_pause","_ce_reset","_ce_tick_frame",
       "_ce_frame_ptr","_ce_frame_width","_ce_frame_height","_ce_frame_has_status_row","_ce_status_alpha_ptr",
       "_ce_status_alpha_len","_ce_is_running","_ce_is_paused","_ce_set_display_color",
-      "_ce_set_key","_ce_release_all","_ce_bind_key","_ce_handle_key",
+      "_ce_set_key","_ce_release_all","_ce_bind_key","_ce_unbind_key","_ce_handle_key",
       "_ce_read_memory","_ce_write_memory","_ce_pc","_ce_registers_json",
       "_ce_backtrace","_ce_disassemble","_ce_add_execution_breakpoint",
       "_ce_remove_execution_breakpoint","_ce_add_memory_breakpoint",

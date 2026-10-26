@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pause, Play, RotateCcw } from "lucide-react";
-import type { FrameState, ModelRecord } from "../core/types";
+import { Keyboard, Pause, Play, RotateCcw, X } from "lucide-react";
+import {
+  bindingOwner,
+  buttonBinding,
+  isReservedKeyCode,
+  keyBindingLabel,
+  normalizeCapturedKey,
+  type BindingConflict,
+  type KeyBindingOverrides,
+} from "../core/keyBindings";
+import type { FrameState, ModelButton, ModelRecord } from "../core/types";
 import type { CalculatorSkin } from "./calculatorModel";
 import { iframeDocument } from "./calculatorSkin";
 
@@ -16,6 +25,23 @@ interface CalculatorStageProps {
   onReset: () => void;
   onPress: (kiko: number, pressed: boolean) => void;
   onReleaseAll: () => void;
+  keyBindings: KeyBindingOverrides;
+  onSetKeyBinding: (button: ModelButton, code: string) => Promise<void>;
+  onResetKeyBinding: (button: ModelButton) => Promise<void>;
+}
+
+interface SkinButton extends ModelButton {
+  label: string;
+}
+
+interface MenuConflict extends Omit<BindingConflict, "button"> {
+  button: SkinButton;
+}
+
+interface MenuState {
+  button: SkinButton;
+  left: number;
+  top: number;
 }
 
 function drawScreen(canvas: HTMLCanvasElement, frame: FrameState | null) {
@@ -99,11 +125,20 @@ export function CalculatorStage({
   onReset,
   onPress,
   onReleaseAll,
+  keyBindings,
+  onSetKeyBinding,
+  onResetKeyBinding,
 }: CalculatorStageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [wrapWidth, setWrapWidth] = useState(560);
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  const [capturing, setCapturing] = useState(false);
+  const [captureError, setCaptureError] = useState("");
+  const [conflict, setConflict] = useState<MenuConflict | null>(null);
   const pressed = useRef(new Set<number>());
+  const longPress = useRef<{ timer: number; x: number; y: number } | null>(null);
   const scale = useMemo(() => {
     const maxWidth = Math.max(230, wrapWidth - 28);
     const maxHeight = Math.max(260, window.innerHeight - 250);
@@ -126,6 +161,121 @@ export function CalculatorStage({
   useEffect(() => {
     if (canvasRef.current && frame) drawScreen(canvasRef.current, frame);
   }, [frame, screenHeight, screenWidth]);
+
+  const closeMenu = () => {
+    setMenu(null);
+    setCapturing(false);
+    setCaptureError("");
+    setConflict(null);
+  };
+
+  useEffect(() => {
+    if (!menu || capturing) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      closeMenu();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code === "Escape") {
+        event.preventDefault();
+        closeMenu();
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [capturing, menu]);
+
+  useEffect(() => () => {
+    if (longPress.current) window.clearTimeout(longPress.current.timer);
+  }, []);
+
+  const skinButtons = useMemo(
+    () =>
+      skin.buttons.map((button) => {
+        const source = record.manifest.buttons.find(
+          (candidate) => candidate.kiko === button.kiko,
+        );
+        return {
+          id: button.id,
+          kiko: button.kiko,
+          keyname: source?.keyname ?? "",
+          rect: button.rect,
+          label: button.label,
+        };
+      }),
+    [record.manifest.buttons, skin.buttons],
+  );
+
+  useEffect(() => {
+    if (!capturing || !menu) return;
+    const onCapture = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.repeat) return;
+      if (event.code === "Escape") {
+        setCapturing(false);
+        setCaptureError("");
+        setConflict(null);
+        return;
+      }
+      const code = normalizeCapturedKey(event.code);
+      if (!code) {
+        setCaptureError("Press a non-modifier key.");
+        return;
+      }
+      if (isReservedKeyCode(code)) {
+        setCaptureError(`${keyBindingLabel(code)} is reserved by the debugger.`);
+        return;
+      }
+      const owner = bindingOwner(code, skinButtons, keyBindings, menu.button.id);
+      if (owner) {
+        setConflict({
+          ...owner,
+          button: {
+            ...owner.button,
+            label:
+              skinButtons.find((button) => button.id === owner.button.id)?.label ??
+              (owner.button.keyname || `Key ${owner.button.kiko}`),
+          },
+        });
+        setCapturing(false);
+        return;
+      }
+      void onSetKeyBinding(menu.button, code).then(() => closeMenu());
+    };
+    window.addEventListener("keydown", onCapture, true);
+    return () => window.removeEventListener("keydown", onCapture, true);
+  }, [capturing, keyBindings, menu, onSetKeyBinding, skinButtons]);
+
+  const openMenu = (button: SkinButton, clientX: number, clientY: number) => {
+    const stage = wrapRef.current;
+    if (!stage) return;
+    const bounds = stage.getBoundingClientRect();
+    setMenu({
+      button,
+      left: Math.max(12, Math.min(clientX - bounds.left, bounds.width - 244)),
+      top: Math.max(12, Math.min(clientY - bounds.top, bounds.height - 210)),
+    });
+    setCapturing(false);
+    setCaptureError("");
+    setConflict(null);
+  };
+
+  const startCapture = () => {
+    setCapturing(true);
+    setCaptureError("");
+    setConflict(null);
+  };
+
+  const replaceConflict = async () => {
+    if (!conflict || !menu) return;
+    await onSetKeyBinding(menu.button, conflict.code);
+    closeMenu();
+  };
 
   const boardSvg = record.boardSvg;
   const interfaceSvg = record.interfaceSvg;
@@ -225,40 +375,138 @@ export function CalculatorStage({
             screenRect={skin.screen}
             skinScale={scale}
           />
-          {skin.buttons.map((button) => (
-            <button
-              key={`${button.id}-${button.kiko}`}
-              className="key-hit"
-              aria-label={button.label}
-              title={`${button.label} · kiko ${button.kiko}`}
-              style={{
-                left: button.rect.x * scale,
-                top: button.rect.y * scale,
-                width: Math.max(8, button.rect.w * scale),
-                height: Math.max(8, button.rect.h * scale),
-              }}
-              onPointerDown={(event) => {
-                event.preventDefault();
-                event.currentTarget.setPointerCapture(event.pointerId);
-                pressed.current.add(button.kiko);
-                onPress(button.kiko, true);
-              }}
-              onPointerUp={(event) => {
-                event.preventDefault();
-                releaseAt(button.kiko);
-              }}
-              onPointerCancel={() => releaseAt(button.kiko)}
-              onContextMenu={(event) => event.preventDefault()}
-            />
-          ))}
+          {skinButtons.map((button) => {
+            const binding = buttonBinding(button, keyBindings);
+            return (
+              <button
+                key={`${button.id}-${button.kiko}`}
+                className="key-hit"
+                aria-label={`${button.label} (${keyBindingLabel(binding)})`}
+                title={`${button.label} · ${keyBindingLabel(binding)} · kiko ${button.kiko}`}
+                style={{
+                  left: button.rect.x * scale,
+                  top: button.rect.y * scale,
+                  width: Math.max(8, button.rect.w * scale),
+                  height: Math.max(8, button.rect.h * scale),
+                }}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  if (event.button !== 0) return;
+                  if (event.pointerType === "touch") {
+                    const touch = {
+                      timer: window.setTimeout(() => {
+                        openMenu(button, event.clientX, event.clientY);
+                      }, 550),
+                      x: event.clientX,
+                      y: event.clientY,
+                    };
+                    longPress.current = touch;
+                  }
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  pressed.current.add(button.kiko);
+                  onPress(button.kiko, true);
+                }}
+                onPointerMove={(event) => {
+                  const touch = longPress.current;
+                  if (!touch) return;
+                  if (Math.hypot(event.clientX - touch.x, event.clientY - touch.y) > 8) {
+                    window.clearTimeout(touch.timer);
+                    longPress.current = null;
+                  }
+                }}
+                onPointerUp={(event) => {
+                  event.preventDefault();
+                  const touch = longPress.current;
+                  if (touch) {
+                    window.clearTimeout(touch.timer);
+                    longPress.current = null;
+                  }
+                  releaseAt(button.kiko);
+                }}
+                onPointerCancel={() => {
+                  const touch = longPress.current;
+                  if (touch) {
+                    window.clearTimeout(touch.timer);
+                    longPress.current = null;
+                  }
+                  releaseAt(button.kiko);
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  openMenu(button, event.clientX, event.clientY);
+                }}
+              />
+            );
+          })}
           {!coreReady ? (
             <div className="device-overlay">
               <span className="device-status">{status}</span>
             </div>
           ) : null}
+          {menu ? (
+            <div
+              ref={menuRef}
+              className="binding-menu"
+              role="dialog"
+              aria-label={`Key binding for ${menu.button.label}`}
+              style={{ left: menu.left, top: menu.top }}
+              onContextMenu={(event) => event.preventDefault()}
+            >
+              <div className="binding-menu-head">
+                <div>
+                  <span>Key binding</span>
+                  <strong>{menu.button.label}</strong>
+                </div>
+                <button className="binding-close" onClick={closeMenu} aria-label="Close key binding menu">
+                  <X size={13} />
+                </button>
+              </div>
+              <p className="binding-current">
+                Current <kbd>{keyBindingLabel(buttonBinding(menu.button, keyBindings))}</kbd>
+              </p>
+              <p className="binding-hint">
+                Right-click a key to edit it. Debugger shortcuts stay reserved.
+              </p>
+              {capturing ? (
+                <div className="binding-capture" role="status">
+                  <span className="capture-dot" />
+                  Press a key to bind…
+                </div>
+              ) : conflict ? (
+                <div className="binding-conflict" role="alert">
+                  <strong>{keyBindingLabel(conflict.code)} is already bound.</strong>
+                  <span>It currently presses “{conflict.button.label}”.</span>
+                </div>
+              ) : (
+                <button className="binding-action" onClick={startCapture}>
+                  <Keyboard size={14} />
+                  {buttonBinding(menu.button, keyBindings) ? "Change key" : "Bind key"}
+                </button>
+              )}
+              {captureError ? <p className="binding-error">{captureError}</p> : null}
+              {conflict ? (
+                <div className="binding-buttons">
+                  <button onClick={() => setConflict(null)}>Cancel</button>
+                  <button className="binding-replace" onClick={() => void replaceConflict()}>
+                    Replace
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="binding-reset"
+                  onClick={() => {
+                    void onResetKeyBinding(menu.button).then(closeMenu);
+                  }}
+                  disabled={!buttonBinding(menu.button, keyBindings) && !menu.button.keyname}
+                >
+                  Reset to default
+                </button>
+              )}
+            </div>
+          ) : null}
         </div>
         <div className="stage-caption">
-          <span>Click or touch the printed keys</span>
+          <span>Click keys · Right-click or long-press to bind</span>
           <span className="stage-scale">{Math.round(scale * 100)}%</span>
         </div>
       </div>

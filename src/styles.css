@@ -814,6 +814,226 @@ code {
   background: rgba(8, 123, 116, 0.2);
 }
 
+.binding-menu {
+  position: absolute;
+  z-index: 12;
+  width: min(232px, calc(100% - 24px));
+  padding: 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  color: var(--ink);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.65), transparent 55%),
+    var(--paper-3);
+  box-shadow:
+    0 18px 38px rgba(28, 36, 37, 0.24),
+    0 0 0 1px rgba(255, 255, 255, 0.45) inset;
+  font-family: var(--mono);
+  animation: binding-pop 0.13s ease-out both;
+}
+
+@keyframes binding-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.binding-menu-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--line);
+}
+
+.binding-menu-head span,
+.binding-menu-head strong {
+  display: block;
+}
+
+.binding-menu-head span {
+  color: var(--teal);
+  font-size: 7px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.binding-menu-head strong {
+  margin-top: 2px;
+  overflow: hidden;
+  font-family: var(--sans);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.binding-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 21px;
+  height: 21px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.binding-close:hover {
+  color: var(--rust);
+  border-color: var(--line);
+}
+
+.binding-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 0;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.binding-current kbd {
+  max-width: 135px;
+  overflow: hidden;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 2px;
+  color: var(--ink);
+  background: #fffdf8;
+  font-family: var(--mono);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.binding-hint {
+  margin: 0 0 9px;
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.45;
+}
+
+.binding-action,
+.binding-reset,
+.binding-buttons button {
+  width: 100%;
+  min-height: 30px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--ink-2);
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 9px;
+  text-align: center;
+}
+
+.binding-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--paper-3);
+  border-color: var(--teal);
+  background: var(--teal);
+}
+
+.binding-action:hover {
+  background: var(--teal-bright);
+}
+
+.binding-reset {
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.binding-reset:hover:not(:disabled) {
+  color: var(--rust);
+  border-color: rgba(168, 79, 56, 0.55);
+}
+
+.binding-capture {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 30px;
+  border: 1px dashed var(--teal);
+  border-radius: 3px;
+  color: var(--teal);
+  background: rgba(8, 123, 116, 0.055);
+  font-size: 9px;
+}
+
+.capture-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--teal);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.binding-conflict {
+  padding: 8px 9px;
+  border-left: 2px solid var(--rust);
+  background: rgba(168, 79, 56, 0.075);
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.binding-conflict strong,
+.binding-conflict span {
+  display: block;
+}
+
+.binding-conflict strong {
+  color: var(--rust);
+  font-size: 9px;
+}
+
+.binding-conflict span {
+  margin-top: 2px;
+  color: var(--ink-2);
+}
+
+.binding-error {
+  margin: 8px 0 3px;
+  color: var(--rust);
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.binding-buttons {
+  display: flex;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.binding-buttons button {
+  flex: 1;
+}
+
+.binding-buttons .binding-replace {
+  color: var(--paper-3);
+  border-color: var(--rust);
+  background: var(--rust);
+}
+
+.binding-buttons .binding-replace:hover {
+  filter: brightness(1.08);
+}
+
 .device-overlay {
   position: absolute;
   inset: 0;
@@ -1496,6 +1716,10 @@ code {
 
   .calculator-stage {
     padding: 10px;
+  }
+
+  .binding-menu {
+    width: min(246px, calc(100% - 20px));
   }
 
   .debugger {

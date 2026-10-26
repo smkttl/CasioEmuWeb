@@ -38,6 +38,7 @@ interface CoreModule {
   _ce_set_key(kiko: number, pressed: number): number;
   _ce_release_all(): void;
   _ce_bind_key(keycode: number, kiko: number): number;
+  _ce_unbind_key(keycode: number): number;
   _ce_handle_key(keycode: number, pressed: number): number;
   _ce_read_memory(address: number, length: number, out: number): number;
   _ce_write_memory(address: number, data: number, length: number): number;
@@ -430,6 +431,12 @@ export class WasmEmulatorCore implements EmulatorCore {
     if (!this.module) return;
     const keycode = keyCodeFor(code);
     if (keycode !== null) this.module._ce_bind_key(keycode, kiko);
+  }
+
+  unbindKey(code: string): void {
+    if (!this.module) return;
+    const keycode = keyCodeFor(code);
+    if (keycode !== null) this.module._ce_unbind_key(keycode);
   }
 
   handleKey(code: string, pressed: boolean): boolean {

@@ -1,18 +1,35 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { core } from "../core/wasm";
 import {
+  getKeyBindingOverrides,
   getPersistentState,
   listSnapshots,
+  saveKeyBindingOverrides,
   savePersistentState,
   saveSnapshot,
   setSetting,
   deleteSnapshot,
 } from "../core/storage";
+import {
+  assignBinding,
+  buttonBinding,
+  bindingsForCore,
+  resetBinding,
+  type KeyBindingOverrides,
+} from "../core/keyBindings";
 import type {
   Breakpoint,
   CoreModelInfo,
   DebugSnapshot,
   FrameState,
+  ModelButton,
   ModelRecord,
   SnapshotNode,
 } from "../core/types";
@@ -39,6 +56,10 @@ export interface EmulatorSession {
   press: (kiko: number, pressed: boolean) => void;
   handleKey: (code: string, pressed: boolean) => boolean;
   releaseAll: () => void;
+  buttons: ModelButton[];
+  keyBindings: KeyBindingOverrides;
+  setKeyBinding: (button: ModelButton, code: string) => Promise<void>;
+  resetKeyBinding: (button: ModelButton) => Promise<void>;
   readMemory: (address: number, length: number) => Promise<Uint8Array>;
   writeMemory: (address: number, bytes: Uint8Array) => Promise<void>;
   addBreakpoint: (breakpoint: Breakpoint) => Promise<void>;
@@ -65,6 +86,8 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
   const [debug, setDebug] = useState<DebugSnapshot | null>(null);
   const [snapshots, setSnapshots] = useState<SnapshotNode[]>([]);
   const [modelInfo, setModelInfo] = useState<CoreModelInfo | null>(null);
+  const [keyBindings, setKeyBindings] = useState<KeyBindingOverrides>({});
+  const keyBindingsRef = useRef<KeyBindingOverrides>({});
   const [sessionKey, setSessionKey] = useState(0);
   const [, forceRender] = useReducer((value: number) => value + 1, 0);
   const recordRef = useRef<ModelRecord | null>(record);
@@ -86,6 +109,8 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
       setDebug(null);
       setSnapshots([]);
       setModelInfo(null);
+      keyBindingsRef.current = {};
+      setKeyBindings({});
       return;
     }
 
@@ -99,8 +124,13 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
         if (cancelled || generation !== loadGeneration.current) return;
         const info = core.readModelInfo();
         setModelInfo(info);
-        for (const button of info.buttons ?? record.manifest.buttons) {
-          if (button.keyname) core.bindKey(button.keyname, button.kiko);
+        const buttons = info.buttons ?? record.manifest.buttons;
+        const savedBindings = await getKeyBindingOverrides(record.id);
+        if (cancelled || generation !== loadGeneration.current) return;
+        keyBindingsRef.current = savedBindings;
+        setKeyBindings(savedBindings);
+        for (const binding of bindingsForCore(buttons, savedBindings)) {
+          if (binding.code) core.bindKey(binding.code, binding.button.kiko);
         }
         const persistent = await getPersistentState(record.id);
         if (persistent?.byteLength) {
@@ -264,6 +294,49 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
     return core.handleKey(code, pressed);
   }, []);
 
+  const buttons = useMemo(
+    () => modelInfo?.buttons ?? record?.manifest.buttons ?? [],
+    [modelInfo, record],
+  );
+
+  const setKeyBinding = useCallback(
+    async (button: ModelButton, code: string) => {
+      const active = recordRef.current;
+      if (!active) return;
+      const previous = keyBindingsRef.current;
+      const previousCode = buttonBinding(button, previous);
+      const next = assignBinding(previous, button, buttons, code);
+      if (previousCode) core.unbindKey(previousCode);
+      core.releaseAll();
+      const nextBindings = bindingsForCore(buttons, next);
+      for (const binding of nextBindings) {
+        if (binding.code) core.bindKey(binding.code, binding.button.kiko);
+      }
+      keyBindingsRef.current = next;
+      setKeyBindings(next);
+      await saveKeyBindingOverrides(active.id, next);
+    },
+    [buttons],
+  );
+
+  const resetKeyBinding = useCallback(
+    async (button: ModelButton) => {
+      const active = recordRef.current;
+      if (!active) return;
+      const previous = keyBindingsRef.current;
+      const next = resetBinding(previous, button);
+      const previousCode = buttonBinding(button, previous);
+      const nextCode = buttonBinding(button, next);
+      if (previousCode) core.unbindKey(previousCode);
+      core.releaseAll();
+      if (nextCode) core.bindKey(nextCode, button.kiko);
+      keyBindingsRef.current = next;
+      setKeyBindings(next);
+      await saveKeyBindingOverrides(active.id, next);
+    },
+    [],
+  );
+
   const persistNow = useCallback(async () => {
     const active = recordRef.current;
     if (!active) return;
@@ -346,6 +419,10 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
     press,
     handleKey,
     releaseAll,
+    buttons,
+    keyBindings,
+    setKeyBinding,
+    resetKeyBinding,
     readMemory: (address, length) => core.readMemory(address, length),
     writeMemory: (address, bytes) => core.writeMemory(address, bytes),
     addBreakpoint: (breakpoint) => core.addBreakpoint(breakpoint),
