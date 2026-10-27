@@ -126,7 +126,8 @@ export async function listSnapshots(modelId: string): Promise<SnapshotNode[]> {
 
 export async function saveSnapshot(modelId: string, node: SnapshotNode): Promise<void> {
   const db = await database();
-  await db.put("snapshots", { id: `${modelId}:${node.id}`, modelId, node });
+  const key = `${modelId}:${node.id}`;
+  await db.put("snapshots", { id: key, modelId, node }, key);
 }
 
 export async function deleteSnapshot(modelId: string, id: string): Promise<void> {

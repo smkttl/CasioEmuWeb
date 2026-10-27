@@ -188,6 +188,7 @@ function DebuggerContent({
   const [breakKind, setBreakKind] = useState<Breakpoint["kind"]>("execution");
   const [breakAddress, setBreakAddress] = useState("");
   const [snapshotLabel, setSnapshotLabel] = useState("");
+  const [snapshotError, setSnapshotError] = useState("");
 
   if (!debug) {
     return (
@@ -377,13 +378,27 @@ function DebuggerContent({
         <button
           className="mini-button"
           onClick={async () => {
-            await session.saveSnapshot(snapshotLabel.trim() || "Snapshot", null);
-            setSnapshotLabel("");
+            setSnapshotError("");
+            try {
+              await session.saveSnapshot(snapshotLabel.trim() || "Snapshot", null);
+              setSnapshotLabel("");
+            } catch (cause) {
+              setSnapshotError(
+                `Could not save state: ${
+                  cause instanceof Error ? cause.message : String(cause)
+                }`,
+              );
+            }
           }}
         >
           <Save size={14} /> Save state
         </button>
       </div>
+      {snapshotError ? (
+        <p className="pane-error" role="alert">
+          {snapshotError}
+        </p>
+      ) : null}
       {session.snapshots.length ? (
         <div className="snapshot-tree">
           {session.snapshots.map((node) => (
