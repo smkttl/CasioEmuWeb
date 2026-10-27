@@ -53,4 +53,17 @@ describe("physical key mapping", () => {
     expect(keyCodeFor("Keypad Enter")).toBe(13);
     expect(keyCodeFor("Keypad 5")).toBeNull();
   });
+
+  it("maps modifier chords into a stable synthetic keycode range", () => {
+    const plain = keyCodeFor("Digit9");
+    const shifted = keyCodeFor("Shift+Digit9");
+    expect(plain).toBe(57);
+    expect(shifted).toBe(0x10000000 + (0x4 << 16) + 57);
+    expect(shifted).not.toBe(plain);
+    expect(keyCodeFor("Shift+Digit9")).toBe(shifted);
+    expect(keyCodeFor("Control+Alt+Shift+Meta+KeyQ")).toBe(
+      0x10000000 + (0xf << 16) + 81,
+    );
+    expect(keyCodeFor("Shift+UnknownKey")).toBeNull();
+  });
 });

@@ -290,9 +290,35 @@ const KEY_CODE_NAMES: Record<string, number> = {
   Backquote: 192,
 };
 
+const MODIFIER_CODES = {
+  Control: 0x1,
+  Alt: 0x2,
+  Shift: 0x4,
+  Meta: 0x8,
+} as const;
+
+function modifierMaskFor(name: string): number {
+  let mask = 0;
+  let remaining = name;
+  for (const modifier of ["Control", "Alt", "Shift", "Meta"] as const) {
+    if (remaining.startsWith(`${modifier}+`)) {
+      mask |= MODIFIER_CODES[modifier];
+      remaining = remaining.slice(modifier.length + 1);
+    }
+  }
+  return mask;
+}
+
 export function keyCodeFor(name: string): number | null {
   const value = name.trim();
   if (!value) return null;
+  const modifierMask = modifierMaskFor(value);
+  if (modifierMask) {
+    const baseIndex = value.lastIndexOf("+");
+    const base = keyCodeFor(value.slice(baseIndex + 1));
+    if (base === null) return null;
+    return 0x10000000 + (modifierMask << 16) + base;
+  }
   if (KEY_CODE_NAMES[value] !== undefined) return KEY_CODE_NAMES[value];
   if (/^F(?:[1-9]|1[0-2])$/.test(value)) {
     return 111 + Number.parseInt(value.slice(1), 10);

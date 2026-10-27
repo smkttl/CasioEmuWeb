@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Bug } from "lucide-react";
 import type { ImportPreview, ModelRecord } from "../core/types";
 import {
@@ -14,6 +14,11 @@ import { CalculatorStage } from "./CalculatorStage";
 import { Debugger } from "./Debugger";
 import { applyCoreModelInfo, skinFor } from "./calculatorModel";
 import { useEmulator } from "./useEmulator";
+import {
+  KeyChordTracker,
+  isReservedKeyCode,
+  keyChordFromEvent,
+} from "../core/keyBindings";
 
 export function App() {
   const [models, setModels] = useState<ModelRecord[]>([]);
@@ -21,6 +26,8 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [mobileDebugOpen, setMobileDebugOpen] = useState(false);
   const session = useEmulator(active);
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
   const activeModel = useMemo(
     () => (active ? applyCoreModelInfo(active, session.modelInfo) : null),
     [active, session.modelInfo],
@@ -73,7 +80,9 @@ export function App() {
   };
 
   useEffect(() => {
+    const pressedChords = new KeyChordTracker();
     const onKeyDown = (event: KeyboardEvent) => {
+      const current = sessionRef.current;
       if (!active) return;
       const target = event.target as HTMLElement | null;
       const inField =
@@ -84,48 +93,62 @@ export function App() {
       if (inField) return;
       if (event.key === "F5") {
         event.preventDefault();
-        void session.start();
+        void current.start();
       } else if (event.key === "F8") {
         event.preventDefault();
-        session.pause(true);
+        current.pause(true);
       } else if (event.key === "F10") {
         event.preventDefault();
-        void session.stepOver();
+        void current.stepOver();
       } else if (event.key === "F11") {
         event.preventDefault();
-        void session.stepInto();
+        void current.stepInto();
       } else if (event.key === "F9") {
         event.preventDefault();
-        if (session.debug) {
-          void session.addBreakpoint({
-            id: `exec-${session.debug.registers.pc}`,
-            address: session.debug.registers.pc,
+        if (current.debug) {
+          void current.addBreakpoint({
+            id: `exec-${current.debug.registers.pc}`,
+            address: current.debug.registers.pc,
             enabled: true,
             kind: "execution",
           });
         }
-      } else if (session.handleKey(event.code, true)) {
-        event.preventDefault();
+      } else {
+        const chord = keyChordFromEvent(event.code, event);
+        if (pressedChords.isActive(event.code)) {
+          event.preventDefault();
+          return;
+        }
+        if (
+          chord &&
+          !isReservedKeyCode(chord) &&
+          current.handleKey(chord, true)
+        ) {
+          pressedChords.press(event.code, chord);
+          event.preventDefault();
+        }
       }
     };
     const onKeyUp = (event: KeyboardEvent) => {
-      if (session.handleKey(event.code, false)) event.preventDefault();
+      const chord = pressedChords.release(event.code);
+      if (chord && sessionRef.current.handleKey(chord, false)) event.preventDefault();
+    };
+    const releasePressed = () => {
+      for (const chord of pressedChords.clear()) {
+        sessionRef.current.handleKey(chord, false);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", releasePressed);
     return () => {
+      releasePressed();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", releasePressed);
     };
   }, [
     active,
-    session.pause,
-    session.start,
-    session.stepInto,
-    session.stepOver,
-    session.handleKey,
-    session.debug,
-    session.addBreakpoint,
   ]);
 
   if (loading) {

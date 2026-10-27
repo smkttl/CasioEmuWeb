@@ -4,9 +4,12 @@ import {
   bindingOwner,
   bindingsForCore,
   buttonBinding,
+  KeyChordTracker,
+  keyChordFromEvent,
   isReservedKeyCode,
   keyBindingLabel,
   normalizeCapturedKey,
+  parseKeyChord,
   resetBinding,
 } from "./keyBindings";
 import type { ModelButton } from "./types";
@@ -76,6 +79,8 @@ describe("key bindings", () => {
     expect(keyBindingLabel("Digit7")).toBe("7");
     expect(keyBindingLabel("NumpadEnter")).toBe("Num Enter");
     expect(keyBindingLabel("ArrowLeft")).toBe("Left");
+    expect(keyBindingLabel("Shift+Digit9")).toBe("Shift+9");
+    expect(keyBindingLabel("Control+Alt+Shift+Meta+KeyQ")).toBe("Ctrl+Alt+Shift+Meta+Q");
     expect(keyBindingLabel(null)).toBe("Not bound");
   });
 
@@ -85,5 +90,54 @@ describe("key bindings", () => {
     expect(normalizeCapturedKey("KeyQ")).toBe("KeyQ");
     expect(isReservedKeyCode("F5")).toBe(true);
     expect(isReservedKeyCode("F12")).toBe(false);
+  });
+
+  it("builds modifier chords from the physical key and modifier state", () => {
+    expect(keyChordFromEvent("Digit9", { shiftKey: true })).toBe("Shift+Digit9");
+    expect(keyChordFromEvent("Digit9")).toBe("Digit9");
+    expect(
+      keyChordFromEvent("KeyQ", {
+        metaKey: true,
+        shiftKey: true,
+        altKey: true,
+        ctrlKey: true,
+      }),
+    ).toBe("Control+Alt+Shift+Meta+KeyQ");
+    expect(keyChordFromEvent("ShiftLeft", { shiftKey: true })).toBeNull();
+  });
+
+  it("parses the modifier prefix without changing the physical base key", () => {
+    expect(parseKeyChord("Shift+Digit9")).toEqual({
+      modifiers: ["Shift"],
+      base: "Digit9",
+    });
+    expect(parseKeyChord("Control+Alt+KeyQ")).toEqual({
+      modifiers: ["Control", "Alt"],
+      base: "KeyQ",
+    });
+    expect(isReservedKeyCode("Shift+F5")).toBe(true);
+  });
+
+  it("keeps shifted and unshifted bindings distinct", () => {
+    const nine = button("nine", 0x19, "Digit9");
+    const paren = button("paren", 0x1a);
+    expect(bindingOwner("Shift+Digit9", [nine, paren], {})).toBeNull();
+    const next = assignBinding({}, paren, [nine, paren], "Shift+Digit9");
+    expect(buttonBinding(nine, next)).toBe("Digit9");
+    expect(buttonBinding(paren, next)).toBe("Shift+Digit9");
+  });
+
+  it("tracks the chord released for each physical key", () => {
+    const tracker = new KeyChordTracker();
+    expect(tracker.press("Digit9", "Shift+Digit9")).toBe(true);
+    expect(tracker.press("Digit9", "Digit9")).toBe(false);
+    expect(tracker.release("ShiftLeft")).toBeNull();
+    expect(tracker.release("Digit9")).toBe("Shift+Digit9");
+    expect(tracker.release("Digit9")).toBeNull();
+
+    tracker.press("KeyQ", "Control+KeyQ");
+    tracker.press("Digit9", "Shift+Digit9");
+    expect(tracker.clear()).toEqual(["Control+KeyQ", "Shift+Digit9"]);
+    expect(tracker.release("KeyQ")).toBeNull();
   });
 });

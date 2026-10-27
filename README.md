@@ -97,7 +97,9 @@ change its physical-key binding. Bindings are stored locally per model and
 can be reset to the imported model's default. If a key is already assigned to
 another button, the editor warns you and offers Cancel or Replace; replacing
 moves that key to the selected button. Modifier-only keys and the debugger
-shortcuts above cannot be bound.
+shortcuts above cannot be bound. Modifier chords are distinct bindings: for
+example, `Shift+9` does not conflict with `9`, and `Ctrl`, `Alt`, and `Meta`
+combinations are tracked independently.
 
 ## Architecture
 

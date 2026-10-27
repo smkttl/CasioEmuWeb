@@ -3,9 +3,10 @@ import { Keyboard, Pause, Play, RotateCcw, X } from "lucide-react";
 import {
   bindingOwner,
   buttonBinding,
+  isModifierCode,
   isReservedKeyCode,
+  keyChordFromEvent,
   keyBindingLabel,
-  normalizeCapturedKey,
   type BindingConflict,
   type KeyBindingOverrides,
 } from "../core/keyBindings";
@@ -222,9 +223,11 @@ export function CalculatorStage({
         setConflict(null);
         return;
       }
-      const code = normalizeCapturedKey(event.code);
+      const code = keyChordFromEvent(event.code, event);
       if (!code) {
-        setCaptureError("Press a non-modifier key.");
+        if (!isModifierCode(event.code)) {
+          setCaptureError("Press a non-modifier key.");
+        }
         return;
       }
       if (isReservedKeyCode(code)) {

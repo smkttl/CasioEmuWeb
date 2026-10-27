@@ -123,6 +123,18 @@ describe("CalculatorStage key binding editor", () => {
     });
   });
 
+  it("captures Shift plus a digit as a distinct chord", () => {
+    const { onSet } = renderStage();
+    const key = screen.getByRole("button", { name: "1 (1)" });
+    fireEvent.contextMenu(key, { clientX: 40, clientY: 40 });
+    fireEvent.click(screen.getByRole("button", { name: "Change key" }));
+    fireEvent.keyDown(window, { code: "Digit9", key: "(", shiftKey: true });
+    expect(onSet).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "one" }),
+      "Shift+Digit9",
+    );
+  });
+
   it("resets to the imported default", () => {
     const { onReset } = renderStage({ one: "KeyQ" });
     const key = screen.getByRole("button", { name: "1 (Q)" });
