@@ -14,6 +14,7 @@ files and firmware that you are legally entitled to use.
 - `config.json` and `config.bin` model imports from a folder or ZIP.
 - Registers, disassembly, breakpoints, memory inspection/editing, call stack,
   snapshots, and persistent battery-backed RAM.
+- Portable battery-backed RAM export/import with `.cewram` files.
 - SVG board, SVG interface, and bitmap interface skins.
 - Model files, RAM, and snapshots stored locally in IndexedDB.
 - No backend, ROM bundle, pthreads, `SharedArrayBuffer`, or cross-origin
@@ -79,6 +80,19 @@ The importer strips one enclosing archive directory, normalizes paths, rejects
 path traversal, case-insensitive collisions, symlinks, encrypted ZIP entries,
 oversized archives, and unsupported hardware IDs. Imported files remain in the
 browser and are not uploaded.
+
+## RAM files
+
+Open the debugger's **States** tab to download or restore battery-backed RAM.
+**Save RAM** downloads a `.cewram` file containing the model identity,
+hardware ID, export timestamp, and the emulator's persistent payload. **Load
+RAM** validates the file and asks before replacing the current saved RAM. The
+imported state is applied immediately and persisted to IndexedDB for that
+model.
+
+`.cewram` files are specific to CasioEmuWeb. They are not raw CasioEmuMsvc
+`ram.dmp` files, and they cannot be loaded into a different model or hardware
+family. RAM files stay on your device unless you choose to move them.
 
 ## Debug shortcuts
 

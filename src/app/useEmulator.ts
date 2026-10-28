@@ -8,6 +8,7 @@ import {
 } from "react";
 import { core } from "../core/wasm";
 import {
+  deletePersistentState,
   getKeyBindingOverrides,
   getPersistentState,
   listSnapshots,
@@ -24,6 +25,12 @@ import {
   resetBinding,
   type KeyBindingOverrides,
 } from "../core/keyBindings";
+import {
+  decodeRamFile,
+  encodeRamFile,
+  ramFileName,
+  type RamImportPreview,
+} from "../core/ramFile";
 import type {
   Breakpoint,
   CoreModelInfo,
@@ -67,6 +74,9 @@ export interface EmulatorSession {
   saveSnapshot: (label: string, parentId: string | null) => Promise<SnapshotNode>;
   restoreSnapshot: (node: SnapshotNode) => Promise<void>;
   removeSnapshot: (node: SnapshotNode) => Promise<void>;
+  downloadRam: () => Promise<void>;
+  readRamFile: (file: File) => Promise<RamImportPreview>;
+  restoreRam: (preview: RamImportPreview) => Promise<void>;
   persistNow: () => Promise<void>;
 }
 
@@ -379,6 +389,69 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
     [],
   );
 
+  const downloadRam = useCallback(async () => {
+    const active = recordRef.current;
+    if (!active) throw new Error("No calculator is loaded.");
+    core.pause(true);
+    const exportedAt = new Date();
+    const payload = await core.savePersistentState();
+    const bytes = encodeRamFile(
+      payload,
+      {
+        modelId: active.id,
+        modelName: active.name,
+        hardwareId: active.hardwareId,
+      },
+      exportedAt,
+    );
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = ramFileName(active.name, exportedAt);
+    link.click();
+    URL.revokeObjectURL(url);
+    setStatus("paused");
+    setMessage(`Saved RAM to ${link.download}.`);
+  }, []);
+
+  const readRamFile = useCallback(async (file: File) => {
+    const active = recordRef.current;
+    if (!active) throw new Error("No calculator is loaded.");
+    return decodeRamFile(new Uint8Array(await file.arrayBuffer()), active, file.name);
+  }, []);
+
+  const restoreRam = useCallback(async (preview: RamImportPreview) => {
+    const active = recordRef.current;
+    if (!active) throw new Error("No calculator is loaded.");
+    core.pause(true);
+    const previous = await getPersistentState(active.id);
+    try {
+      await core.loadPersistentState(preview.payload);
+      await savePersistentState(active.id, preview.payload);
+      lastPersist.current = Date.now();
+      setFrame(core.readFrame());
+      setDebug(await core.readDebugState());
+      setStatus("paused");
+      setMessage(`Loaded RAM from ${preview.fileName}.`);
+    } catch (error) {
+      if (previous?.byteLength) {
+        try {
+          await core.loadPersistentState(previous);
+          await savePersistentState(active.id, previous);
+        } catch {
+          // Report the original import failure.
+        }
+      } else {
+        try {
+          await deletePersistentState(active.id);
+        } catch {
+          // Report the original import failure.
+        }
+      }
+      throw error;
+    }
+  }, []);
+
   useEffect(() => {
     const interval = window.setInterval(() => {
       if (status === "running" && Date.now() - lastPersist.current > 30_000) {
@@ -430,6 +503,9 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
     saveSnapshot: saveSnapshotNow,
     restoreSnapshot: restoreSnapshotNow,
     removeSnapshot: removeSnapshotNow,
+    downloadRam,
+    readRamFile,
+    restoreRam,
     persistNow,
   };
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Download,
   Bookmark,
   Bug,
   ChevronDown,
@@ -18,6 +19,7 @@ import {
   Save,
   StepForward,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 import type {
@@ -25,6 +27,7 @@ import type {
   DebugSnapshot,
   SnapshotNode,
 } from "../core/types";
+import type { RamImportPreview } from "../core/ramFile";
 import type { EmulatorSession } from "./useEmulator";
 
 type DebugTab = "state" | "disassembly" | "breakpoints" | "memory" | "stack" | "snapshots";
@@ -175,13 +178,15 @@ function MemoryView({ session, paused }: { session: EmulatorSession; paused: boo
   );
 }
 
-function DebuggerContent({
-  tab,
-  session,
-}: {
+interface DebuggerContentProps {
   tab: DebugTab;
   session: EmulatorSession;
-}) {
+}
+
+export function DebuggerContent({
+  tab,
+  session,
+}: DebuggerContentProps) {
   const debug = session.debug;
   const paused = session.status !== "running";
   const groups = registerGroups(debug);
@@ -189,6 +194,9 @@ function DebuggerContent({
   const [breakAddress, setBreakAddress] = useState("");
   const [snapshotLabel, setSnapshotLabel] = useState("");
   const [snapshotError, setSnapshotError] = useState("");
+  const [ramPreview, setRamPreview] = useState<RamImportPreview | null>(null);
+  const [ramMessage, setRamMessage] = useState("");
+  const [ramError, setRamError] = useState("");
 
   if (!debug) {
     return (
@@ -369,6 +377,98 @@ function DebuggerContent({
 
   return (
     <div className="debug-pane">
+      <div className="pane-toolbar">
+        <span>RAM FILES</span>
+        <div className="snapshot-actions">
+          <button
+            className="mini-button"
+            onClick={async () => {
+              setRamMessage("");
+              setRamError("");
+              try {
+                await session.downloadRam();
+                setRamMessage("RAM file downloaded.");
+              } catch (cause) {
+                setRamError(
+                  `Could not save RAM: ${
+                    cause instanceof Error ? cause.message : String(cause)
+                  }`,
+                );
+              }
+            }}
+          >
+            <Download size={14} /> Save RAM
+          </button>
+          <label className="mini-button file-button">
+            <Upload size={14} /> Load RAM
+            <input
+              type="file"
+              accept=".cewram,application/octet-stream"
+              aria-label="Load RAM file"
+              onChange={async (event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (!file) return;
+                setRamPreview(null);
+                setRamMessage("");
+                setRamError("");
+                try {
+                  setRamPreview(await session.readRamFile(file));
+                } catch (cause) {
+                  setRamError(
+                    `Could not load RAM: ${
+                      cause instanceof Error ? cause.message : String(cause)
+                    }`,
+                  );
+                }
+              }}
+            />
+          </label>
+        </div>
+      </div>
+      {ramPreview ? (
+        <div className="ram-confirm" role="alertdialog" aria-label="Confirm RAM replacement">
+          <p>
+            Replace the current saved RAM with <code>{ramPreview.fileName}</code> from{" "}
+            {ramPreview.metadata.modelName}?
+          </p>
+          <div>
+            <button
+              className="mini-button"
+              onClick={async () => {
+                const preview = ramPreview;
+                setRamError("");
+                try {
+                  await session.restoreRam(preview);
+                  setRamPreview(null);
+                  setRamMessage(`Loaded RAM from ${preview.fileName}.`);
+                } catch (cause) {
+                  setRamError(
+                    `Could not restore RAM: ${
+                      cause instanceof Error ? cause.message : String(cause)
+                    }`,
+                  );
+                }
+              }}
+            >
+              Replace RAM
+            </button>
+            <button className="mini-button" onClick={() => setRamPreview(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {ramMessage ? (
+        <p className="pane-note ram-success" role="status">
+          {ramMessage}
+        </p>
+      ) : null}
+      {ramError ? (
+        <p className="pane-error" role="alert">
+          {ramError}
+        </p>
+      ) : null}
       <div className="snapshot-form">
         <input
           placeholder="Snapshot label"

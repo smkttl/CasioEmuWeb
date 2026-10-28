@@ -2,8 +2,11 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   clearAllData,
+  deletePersistentState,
   deleteSnapshot,
+  getPersistentState,
   listSnapshots,
+  savePersistentState,
   saveSnapshot,
 } from "./storage";
 import type { SnapshotNode } from "./types";
@@ -59,5 +62,21 @@ describe("snapshot storage", () => {
     expect((await listSnapshots("model-b")).map((node) => node.id)).toEqual([
       "3-other",
     ]);
+  });
+});
+
+describe("persistent RAM storage", () => {
+  beforeEach(async () => {
+    await clearAllData();
+  });
+
+  it("round-trips persistent RAM bytes by model", async () => {
+    await savePersistentState("model-a", new Uint8Array([0, 1, 127, 255]));
+
+    expect([...(await getPersistentState("model-a"))!]).toEqual([0, 1, 127, 255]);
+    expect(await getPersistentState("model-b")).toBeUndefined();
+
+    await deletePersistentState("model-a");
+    expect(await getPersistentState("model-a")).toBeUndefined();
   });
 });

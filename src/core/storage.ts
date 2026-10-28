@@ -118,6 +118,11 @@ export async function savePersistentState(id: string, bytes: Uint8Array): Promis
   await db.put("persistent", { modelId: id, bytes, updatedAt: Date.now() }, id);
 }
 
+export async function deletePersistentState(id: string): Promise<void> {
+  const db = await database();
+  await db.delete("persistent", id);
+}
+
 export async function listSnapshots(modelId: string): Promise<SnapshotNode[]> {
   const db = await database();
   const values = await db.getAllFromIndex("snapshots", "by-model", modelId);
