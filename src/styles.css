@@ -1793,6 +1793,96 @@ code {
   width: 76px;
 }
 
+.bulk-memory-editor {
+  margin: 2px 0 14px;
+  padding: 10px;
+  border: 1px solid #394841;
+  border-radius: 3px;
+  background: rgba(28, 38, 33, 0.62);
+}
+
+.bulk-memory-heading,
+.bulk-memory-heading > div,
+.bulk-memory-actions,
+.bulk-memory-preview > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.bulk-memory-heading {
+  justify-content: space-between;
+}
+
+.bulk-memory-heading > div:first-child {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bulk-memory-heading strong {
+  color: #b9d4c4;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+}
+
+.bulk-memory-heading span,
+.bulk-memory-preview span {
+  color: #718078;
+  font-family: var(--mono);
+  font-size: 7px;
+}
+
+.bulk-memory-actions {
+  flex: none;
+}
+
+.bulk-memory-editor textarea {
+  width: 100%;
+  min-height: 56px;
+  margin-top: 8px;
+  padding: 8px;
+  resize: vertical;
+  border: 1px solid #46514b;
+  border-radius: 2px;
+  box-sizing: border-box;
+  color: #d8e2da;
+  background: #222a26;
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1.65;
+}
+
+.bulk-memory-editor textarea:disabled {
+  color: #69756e;
+}
+
+.bulk-memory-preview {
+  margin-top: 8px;
+  padding: 8px;
+  border-left: 2px solid var(--teal-bright);
+  background: rgba(10, 157, 146, 0.055);
+}
+
+.bulk-memory-preview code {
+  color: #a8e0d2;
+  font-size: 9px;
+}
+
+.bulk-memory-preview p {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+  color: #a6b7ac;
+  font-family: var(--mono);
+  font-size: 8px;
+  line-height: 1.7;
+}
+
+.bulk-memory-success {
+  color: #89c9ad;
+}
+
 .memory-table {
   font-family: var(--mono);
   font-size: 8px;
@@ -2110,6 +2200,20 @@ code {
   .memory-byte {
     width: 17px;
     font-size: 7px;
+  }
+
+  .bulk-memory-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .bulk-memory-actions {
+    align-self: stretch;
+  }
+
+  .bulk-memory-actions .mini-button {
+    flex: 1;
+    justify-content: center;
   }
 }
 

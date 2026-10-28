@@ -55,7 +55,7 @@ function session(overrides: Partial<EmulatorSession> = {}): EmulatorSession {
     keyBindings: {},
     setKeyBinding: vi.fn(),
     resetKeyBinding: vi.fn(),
-    readMemory: vi.fn(),
+    readMemory: vi.fn().mockResolvedValue(new Uint8Array()),
     writeMemory: vi.fn(),
     addBreakpoint: vi.fn(),
     removeBreakpoint: vi.fn(),
@@ -198,6 +198,125 @@ describe("RAM file controls", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "different calculator hardware",
     );
+  });
+});
+
+describe("bulk memory editing", () => {
+  it("previews exact bytes and applies them once at the captured address", async () => {
+    const readMemory = vi.fn().mockResolvedValue(new Uint8Array(16));
+    const writeMemory = vi.fn().mockResolvedValue(undefined);
+    render(
+      <DebuggerContent
+        tab="memory"
+        session={session({ readMemory, writeMemory })}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Hex bytes"), {
+      target: { value: "00 ff\n1A" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(
+      screen.getByRole("region", { name: "Bulk write preview" }),
+    ).toHaveTextContent("0000–0002");
+    expect(writeMemory).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply write" }));
+    await waitFor(() =>
+      expect(writeMemory).toHaveBeenCalledWith(
+        0,
+        new Uint8Array([0x00, 0xff, 0x1a]),
+      ),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Wrote 3 bytes");
+    expect(screen.queryByRole("region", { name: "Bulk write preview" })).toBeNull();
+  });
+
+  it("requires a fresh preview after the draft changes", () => {
+    render(<DebuggerContent tab="memory" session={session()} />);
+
+    const input = screen.getByLabelText("Hex bytes");
+    fireEvent.change(input, { target: { value: "01 02" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    fireEvent.change(input, { target: { value: "03 04" } });
+
+    expect(screen.queryByRole("region", { name: "Bulk write preview" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Apply write" })).toBeDisabled();
+  });
+
+  it("requires a fresh preview after the address changes", () => {
+    render(<DebuggerContent tab="memory" session={session()} />);
+
+    fireEvent.change(screen.getByLabelText("Hex bytes"), {
+      target: { value: "01 02" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    fireEvent.change(screen.getByLabelText("Address"), {
+      target: { value: "0100" },
+    });
+
+    expect(screen.queryByRole("region", { name: "Bulk write preview" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Apply write" })).toBeDisabled();
+  });
+
+  it("shows parser errors without writing", () => {
+    const writeMemory = vi.fn();
+    render(
+      <DebuggerContent
+        tab="memory"
+        session={session({ writeMemory })}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Hex bytes"), {
+      target: { value: "00 0x01" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      'Invalid hex byte "0x01" on line 1',
+    );
+    expect(writeMemory).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed write armed for retry", async () => {
+    const writeMemory = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Pause the emulator first."))
+      .mockResolvedValueOnce(undefined);
+    render(
+      <DebuggerContent
+        tab="memory"
+        session={session({ writeMemory })}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Hex bytes"), {
+      target: { value: "AA BB" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply write" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Pause the emulator first.",
+    );
+    expect(screen.getByRole("button", { name: "Apply write" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply write" }));
+    await waitFor(() => expect(writeMemory).toHaveBeenCalledTimes(2));
+  });
+
+  it("disables bulk editing while the calculator is running", () => {
+    render(
+      <DebuggerContent
+        tab="memory"
+        session={session({ status: "running" })}
+      />,
+    );
+
+    expect(screen.getByLabelText("Hex bytes")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
   });
 });
 

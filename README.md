@@ -16,6 +16,7 @@ files and firmware that you are legally entitled to use.
   snapshots, and persistent battery-backed RAM.
 - Portable battery-backed RAM export/import with `.cewram` files.
 - Per-model key macro recording and replay with optional timing speeds.
+- Bulk memory editing with whitespace-separated hexadecimal bytes and a preview.
 - SVG board, SVG interface, and bitmap interface skins.
 - Model files, RAM, and snapshots stored locally in IndexedDB.
 - No backend, ROM bundle, pthreads, `SharedArrayBuffer`, or cross-origin

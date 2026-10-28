@@ -37,6 +37,7 @@ import {
   macroSpeedLabel,
   type KeyMacro,
 } from "../core/macros";
+import { parseMemoryHex } from "../core/memoryHex";
 import type { EmulatorSession } from "./useEmulator";
 
 type DebugTab =
@@ -82,6 +83,13 @@ function MemoryView({ session, paused }: { session: EmulatorSession; paused: boo
   const [editing, setEditing] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
   const [error, setError] = useState("");
+  const [bulkText, setBulkText] = useState("");
+  const [bulkPreview, setBulkPreview] = useState<{
+    address: number;
+    bytes: Uint8Array;
+  } | null>(null);
+  const [bulkError, setBulkError] = useState("");
+  const [bulkMessage, setBulkMessage] = useState("");
 
   const load = async () => {
     try {
@@ -95,6 +103,10 @@ function MemoryView({ session, paused }: { session: EmulatorSession; paused: boo
   useEffect(() => {
     void load();
   }, [address, length, paused]);
+
+  useEffect(() => {
+    setBulkPreview(null);
+  }, [address, paused]);
 
   const rows = useMemo(() => {
     const result: Array<{ address: number; data: Uint8Array }> = [];
@@ -118,6 +130,39 @@ function MemoryView({ session, paused }: { session: EmulatorSession; paused: boo
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
+  const previewBulkWrite = () => {
+    setBulkError("");
+    setBulkMessage("");
+    try {
+      setBulkPreview({
+        address,
+        bytes: parseMemoryHex(bulkText),
+      });
+    } catch (cause) {
+      setBulkPreview(null);
+      setBulkError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
+  const applyBulkWrite = async () => {
+    if (!bulkPreview || !paused) return;
+    setBulkError("");
+    setBulkMessage("");
+    try {
+      await session.writeMemory(bulkPreview.address, bulkPreview.bytes);
+      setBulkMessage(
+        `Wrote ${bulkPreview.bytes.byteLength} ${
+          bulkPreview.bytes.byteLength === 1 ? "byte" : "bytes"
+        } at ${hex(bulkPreview.address)}.`,
+      );
+      setBulkText("");
+      setBulkPreview(null);
+      await load();
+    } catch (cause) {
+      setBulkError(cause instanceof Error ? cause.message : String(cause));
     }
   };
 
@@ -150,6 +195,74 @@ function MemoryView({ session, paused }: { session: EmulatorSession; paused: boo
       </div>
       {!paused ? <p className="pane-note">Pause the calculator to edit memory.</p> : null}
       {error ? <p className="pane-error">{error}</p> : null}
+      <section className="bulk-memory-editor" aria-label="Bulk memory write">
+        <div className="bulk-memory-heading">
+          <div>
+            <strong>WRITE HEX BLOCK</strong>
+            <span>Bytes start at the Address field above.</span>
+          </div>
+          <div className="bulk-memory-actions">
+            <button
+              className="mini-button"
+              onClick={previewBulkWrite}
+              disabled={!paused || !bulkText.trim()}
+            >
+              Preview
+            </button>
+            <button
+              className="mini-button"
+              onClick={() => void applyBulkWrite()}
+              disabled={!paused || !bulkPreview}
+            >
+              Apply write
+            </button>
+          </div>
+        </div>
+        <textarea
+          aria-label="Hex bytes"
+          placeholder="00 FF 1A 2B …"
+          value={bulkText}
+          disabled={!paused}
+          spellCheck={false}
+          onChange={(event) => {
+            setBulkText(event.target.value);
+            setBulkPreview(null);
+            setBulkError("");
+            setBulkMessage("");
+          }}
+        />
+        {bulkPreview ? (
+          <div className="bulk-memory-preview" role="region" aria-label="Bulk write preview">
+            <div>
+              <span>Target</span>
+              <code>
+                {hex(bulkPreview.address)}–{hex(
+                  bulkPreview.address + bulkPreview.bytes.byteLength - 1,
+                )}
+              </code>
+              <span>{bulkPreview.bytes.byteLength} bytes</span>
+            </div>
+            <p>
+              {[...bulkPreview.bytes.subarray(0, 512)]
+                .map((value) => hex(value, 2))
+                .join(" ")}
+              {bulkPreview.bytes.byteLength > 512
+                ? ` … +${bulkPreview.bytes.byteLength - 512} more`
+                : ""}
+            </p>
+          </div>
+        ) : null}
+        {bulkMessage ? (
+          <p className="pane-note bulk-memory-success" role="status">
+            {bulkMessage}
+          </p>
+        ) : null}
+        {bulkError ? (
+          <p className="pane-error" role="alert">
+            {bulkError}
+          </p>
+        ) : null}
+      </section>
       <div className="memory-table">
         {rows.map((row) => (
           <div className="memory-row" key={row.address}>
