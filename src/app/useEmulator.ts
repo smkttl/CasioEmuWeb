@@ -9,10 +9,12 @@ import {
 import { core } from "../core/wasm";
 import {
   deletePersistentState,
+  getMacroStore,
   getKeyBindingOverrides,
   getPersistentState,
   listSnapshots,
   saveKeyBindingOverrides,
+  saveMacroStore,
   savePersistentState,
   saveSnapshot,
   setSetting,
@@ -31,6 +33,18 @@ import {
   ramFileName,
   type RamImportPreview,
 } from "../core/ramFile";
+import {
+  createMacro,
+  deleteMacro as removeMacroFromStore,
+  normalizeMacroStore,
+  upsertMacro,
+  type KeyMacro,
+  type MacroRecording,
+  type MacroReplaySpeed,
+  type MacroStore,
+} from "../core/macros";
+import { MacroPlayback } from "../core/macroPlayback";
+import { MacroRecorder } from "../core/macroRecorder";
 import type {
   Breakpoint,
   CoreModelInfo,
@@ -77,6 +91,22 @@ export interface EmulatorSession {
   downloadRam: () => Promise<void>;
   readRamFile: (file: File) => Promise<RamImportPreview>;
   restoreRam: (preview: RamImportPreview) => Promise<void>;
+  macros: KeyMacro[];
+  replaySpeed: MacroReplaySpeed;
+  recording: boolean;
+  recordedEvents: number;
+  recordingElapsedMs: number;
+  pendingRecording: MacroRecording | null;
+  replayingMacroId: string | null;
+  replayElapsedMs: number;
+  startMacroRecording: () => void;
+  stopMacroRecording: () => void;
+  discardMacroRecording: () => void;
+  saveMacroRecording: (name: string) => Promise<KeyMacro>;
+  deleteMacro: (id: string) => Promise<void>;
+  setReplaySpeed: (speed: MacroReplaySpeed) => Promise<void>;
+  replayMacro: (macro: KeyMacro) => void;
+  stopMacroReplay: () => void;
   persistNow: () => Promise<void>;
 }
 
@@ -97,7 +127,23 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
   const [snapshots, setSnapshots] = useState<SnapshotNode[]>([]);
   const [modelInfo, setModelInfo] = useState<CoreModelInfo | null>(null);
   const [keyBindings, setKeyBindings] = useState<KeyBindingOverrides>({});
+  const [macroStore, setMacroStore] = useState<MacroStore>({
+    macros: [],
+    replaySpeed: 1,
+  });
+  const [recording, setRecording] = useState(false);
+  const [recordedEvents, setRecordedEvents] = useState(0);
+  const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
+  const [pendingRecording, setPendingRecording] = useState<MacroRecording | null>(null);
+  const [replayingMacroId, setReplayingMacroId] = useState<string | null>(null);
+  const [replayElapsedMs, setReplayElapsedMs] = useState(0);
   const keyBindingsRef = useRef<KeyBindingOverrides>({});
+  const macroStoreRef = useRef<MacroStore>({ macros: [], replaySpeed: 1 });
+  const macroRecorder = useRef(new MacroRecorder());
+  const macroPlayback = useRef<MacroPlayback | null>(null);
+  const recordingStartedAt = useRef(0);
+  const recordedKeyboardKeys = useRef(new Set<string>());
+  const recordedHeldKeys = useRef(new Set<number>());
   const [sessionKey, setSessionKey] = useState(0);
   const [, forceRender] = useReducer((value: number) => value + 1, 0);
   const recordRef = useRef<ModelRecord | null>(record);
@@ -109,9 +155,22 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
   useEffect(() => {
     recordRef.current = record;
     const generation = ++loadGeneration.current;
+    macroRecorder.current.cancel();
+    macroPlayback.current?.cancel();
+    macroPlayback.current = null;
+    recordedKeyboardKeys.current.clear();
+    recordedHeldKeys.current.clear();
     core.releaseAll();
     setSessionKey((value) => value + 1);
     startedRef.current = false;
+    setRecording(false);
+    setRecordedEvents(0);
+    setRecordingElapsedMs(0);
+    setPendingRecording(null);
+    setReplayingMacroId(null);
+    setReplayElapsedMs(0);
+    macroStoreRef.current = { macros: [], replaySpeed: 1 };
+    setMacroStore(macroStoreRef.current);
     if (!record) {
       setStatus("idle");
       setMessage("No calculator is loaded.");
@@ -136,9 +195,12 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
         setModelInfo(info);
         const buttons = info.buttons ?? record.manifest.buttons;
         const savedBindings = await getKeyBindingOverrides(record.id);
+        const savedMacros = await getMacroStore(record.id);
         if (cancelled || generation !== loadGeneration.current) return;
         keyBindingsRef.current = savedBindings;
         setKeyBindings(savedBindings);
+        macroStoreRef.current = savedMacros;
+        setMacroStore(savedMacros);
         for (const binding of bindingsForCore(buttons, savedBindings)) {
           if (binding.code) core.bindKey(binding.code, binding.button.kiko);
         }
@@ -171,6 +233,37 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
       }
     };
   }, [record]);
+
+  useEffect(() => {
+    if (!recording) return;
+    const interval = window.setInterval(() => {
+      setRecordingElapsedMs(performance.now() - recordingStartedAt.current);
+    }, 100);
+    return () => window.clearInterval(interval);
+  }, [recording]);
+
+  useEffect(() => {
+    const onBlur = () => {
+      macroRecorder.current.cancel();
+      recordedKeyboardKeys.current.clear();
+      recordedHeldKeys.current.clear();
+      macroPlayback.current?.cancel();
+      macroPlayback.current = null;
+      core.releaseAll();
+      setRecording(false);
+      setRecordedEvents(0);
+      setRecordingElapsedMs(0);
+      setPendingRecording(null);
+      setReplayingMacroId(null);
+      setReplayElapsedMs(0);
+    };
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("blur", onBlur);
+      macroRecorder.current.cancel();
+      macroPlayback.current?.cancel();
+    };
+  }, []);
 
   useEffect(() => {
     if (!record) return;
@@ -286,8 +379,28 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
     [],
   );
 
+  const buttons = useMemo(
+    () => modelInfo?.buttons ?? record?.manifest.buttons ?? [],
+    [modelInfo, record],
+  );
+
+  const recordMacroKey = useCallback((kiko: number, pressed: boolean) => {
+    if (!macroRecorder.current.active) return;
+    const button = buttons.find((candidate) => candidate.kiko === kiko);
+    const event = macroRecorder.current.record(
+      kiko,
+      button?.keyname || `Key ${kiko}`,
+      pressed,
+    );
+    if (pressed) recordedHeldKeys.current.add(kiko);
+    else recordedHeldKeys.current.delete(kiko);
+    if (event) setRecordedEvents((count) => count + 1);
+  }, [buttons]);
+
   const press = useCallback((kiko: number, pressed: boolean) => {
     if (!recordRef.current) return;
+    if (macroPlayback.current) return;
+    if (macroRecorder.current.active) recordMacroKey(kiko, pressed);
     core.setKey(kiko, pressed);
     if (pressed && !startedRef.current) {
       startedRef.current = true;
@@ -296,18 +409,41 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
         setMessage("Running.");
       });
     }
-  }, []);
+  }, [recordMacroKey]);
 
-  const releaseAll = useCallback(() => core.releaseAll(), []);
+  const releaseAll = useCallback(() => {
+    if (macroRecorder.current.active) {
+      for (const kiko of [...recordedHeldKeys.current]) {
+        recordMacroKey(kiko, false);
+      }
+    }
+    recordedKeyboardKeys.current.clear();
+    recordedHeldKeys.current.clear();
+    core.releaseAll();
+  }, [recordMacroKey]);
 
   const handleKey = useCallback((code: string, pressed: boolean) => {
-    return core.handleKey(code, pressed);
-  }, []);
-
-  const buttons = useMemo(
-    () => modelInfo?.buttons ?? record?.manifest.buttons ?? [],
-    [modelInfo, record],
-  );
+    if (macroPlayback.current) return true;
+    const handled = core.handleKey(code, pressed);
+    if (handled && macroRecorder.current.active) {
+      const button = buttons.find(
+        (candidate) => buttonBinding(candidate, keyBindingsRef.current) === code,
+      );
+      if (!button) return handled;
+      if (pressed && recordedKeyboardKeys.current.has(code)) return handled;
+      if (!pressed && !recordedKeyboardKeys.current.delete(code)) return handled;
+      if (pressed) recordedKeyboardKeys.current.add(code);
+      recordMacroKey(button.kiko, pressed);
+      if (pressed && !startedRef.current) {
+        startedRef.current = true;
+        void core.start().then(() => {
+          setStatus("running");
+          setMessage("Running.");
+        });
+      }
+    }
+    return handled;
+  }, [buttons, recordMacroKey]);
 
   const setKeyBinding = useCallback(
     async (button: ModelButton, code: string) => {
@@ -317,7 +453,7 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
       const previousCode = buttonBinding(button, previous);
       const next = assignBinding(previous, button, buttons, code);
       if (previousCode) core.unbindKey(previousCode);
-      core.releaseAll();
+      releaseAll();
       const nextBindings = bindingsForCore(buttons, next);
       for (const binding of nextBindings) {
         if (binding.code) core.bindKey(binding.code, binding.button.kiko);
@@ -326,7 +462,7 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
       setKeyBindings(next);
       await saveKeyBindingOverrides(active.id, next);
     },
-    [buttons],
+    [buttons, releaseAll],
   );
 
   const resetKeyBinding = useCallback(
@@ -338,13 +474,13 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
       const previousCode = buttonBinding(button, previous);
       const nextCode = buttonBinding(button, next);
       if (previousCode) core.unbindKey(previousCode);
-      core.releaseAll();
+      releaseAll();
       if (nextCode) core.bindKey(nextCode, button.kiko);
       keyBindingsRef.current = next;
       setKeyBindings(next);
       await saveKeyBindingOverrides(active.id, next);
     },
-    [],
+    [releaseAll],
   );
 
   const persistNow = useCallback(async () => {
@@ -452,6 +588,136 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
     }
   }, []);
 
+  const startMacroRecording = useCallback(() => {
+    if (!recordRef.current || macroPlayback.current) return;
+    core.releaseAll();
+    recordedKeyboardKeys.current.clear();
+    recordedHeldKeys.current.clear();
+    macroRecorder.current.start();
+    recordingStartedAt.current = performance.now();
+    setPendingRecording(null);
+    setRecordedEvents(0);
+    setRecordingElapsedMs(0);
+    setRecording(true);
+  }, []);
+
+  const stopMacroRecording = useCallback(() => {
+    if (!macroRecorder.current.active) return;
+    releaseAll();
+    const result = macroRecorder.current.stop();
+    recordedKeyboardKeys.current.clear();
+    recordedHeldKeys.current.clear();
+    setRecording(false);
+    setRecordingElapsedMs(result?.events.at(-1)?.atMs ?? 0);
+    setRecordedEvents(result?.events.length ?? 0);
+    setPendingRecording(
+      result?.events.length
+        ? {
+            ...result,
+            events: result.events.map((event) =>
+              event.pressed ? event : { ...event },
+            ),
+          }
+        : null,
+    );
+  }, [releaseAll]);
+
+  const discardMacroRecording = useCallback(() => {
+    macroRecorder.current.cancel();
+    recordedKeyboardKeys.current.clear();
+    recordedHeldKeys.current.clear();
+    core.releaseAll();
+    setRecording(false);
+    setPendingRecording(null);
+    setRecordedEvents(0);
+    setRecordingElapsedMs(0);
+  }, []);
+
+  const saveMacroRecording = useCallback(async (name: string) => {
+    const active = recordRef.current;
+    if (!active) throw new Error("No calculator is loaded.");
+    if (!pendingRecording) throw new Error("There is no recording to save.");
+    const macro = createMacro(name, pendingRecording);
+    const next = upsertMacro(macroStoreRef.current, macro);
+    await saveMacroStore(active.id, next);
+    macroStoreRef.current = next;
+    setMacroStore(next);
+    setPendingRecording(null);
+    setRecordedEvents(0);
+    setRecordingElapsedMs(0);
+    return macro;
+  }, [pendingRecording]);
+
+  const deleteSavedMacro = useCallback(async (id: string) => {
+    const active = recordRef.current;
+    if (!active) return;
+    const next = removeMacroFromStore(macroStoreRef.current, id);
+    await saveMacroStore(active.id, next);
+    macroStoreRef.current = next;
+    setMacroStore(next);
+  }, []);
+
+  const setReplaySpeed = useCallback(async (speed: MacroReplaySpeed) => {
+    const active = recordRef.current;
+    if (!active) return;
+    const next = normalizeMacroStore({ ...macroStoreRef.current, replaySpeed: speed });
+    await saveMacroStore(active.id, next);
+    macroStoreRef.current = next;
+    setMacroStore(next);
+  }, []);
+
+  const stopMacroReplay = useCallback(() => {
+    macroPlayback.current?.cancel();
+    macroPlayback.current = null;
+    setReplayingMacroId(null);
+    setReplayElapsedMs(0);
+  }, []);
+
+  const replayMacro = useCallback((macro: KeyMacro) => {
+    if (!recordRef.current || macroRecorder.current.active) return;
+    macroPlayback.current?.cancel();
+    core.releaseAll();
+    if (!startedRef.current) {
+      startedRef.current = true;
+      void core.start().then(() => {
+        setStatus("running");
+        setMessage("Running.");
+      }).catch((error) => {
+        macroPlayback.current = null;
+        setReplayingMacroId(null);
+        setStatus("error");
+        setMessage(getErrorMessage(error));
+      });
+    }
+    setReplayElapsedMs(0);
+    setReplayingMacroId(macro.id);
+    const playback = new MacroPlayback({
+      macro,
+      speed: macroStoreRef.current.replaySpeed,
+      press: (kiko, pressed) => core.setKey(kiko, pressed),
+      releaseAll: () => core.releaseAll(),
+      onProgress: setReplayElapsedMs,
+      onComplete: () => {
+        if (macroPlayback.current !== playback) return;
+        macroPlayback.current = null;
+        setReplayingMacroId(null);
+        setReplayElapsedMs(0);
+        setMessage(`Replayed “${macro.name}”.`);
+      },
+      onError: (error) => {
+        if (macroPlayback.current !== playback) return;
+        macroPlayback.current = null;
+        setReplayingMacroId(null);
+        setReplayElapsedMs(0);
+        setStatus("error");
+        setMessage(getErrorMessage(error));
+      },
+    });
+    macroPlayback.current = playback;
+    setMessage(`Replaying “${macro.name}”.`);
+    playback.start();
+  }, []);
+
   useEffect(() => {
     const interval = window.setInterval(() => {
       if (status === "running" && Date.now() - lastPersist.current > 30_000) {
@@ -506,6 +772,22 @@ export function useEmulator(record: ModelRecord | null): EmulatorSession {
     downloadRam,
     readRamFile,
     restoreRam,
+    macros: macroStore.macros,
+    replaySpeed: macroStore.replaySpeed,
+    recording,
+    recordedEvents,
+    recordingElapsedMs,
+    pendingRecording,
+    replayingMacroId,
+    replayElapsedMs,
+    startMacroRecording,
+    stopMacroRecording,
+    discardMacroRecording,
+    saveMacroRecording,
+    deleteMacro: deleteSavedMacro,
+    setReplaySpeed,
+    replayMacro,
+    stopMacroReplay,
     persistNow,
   };
 }

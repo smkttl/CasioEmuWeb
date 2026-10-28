@@ -12,11 +12,14 @@ import {
   Database,
   Gauge,
   Layers,
+  ListChecks,
   Pause,
   Play,
   Plus,
+  Radio,
   RotateCcw,
   Save,
+  Square,
   StepForward,
   Trash2,
   Upload,
@@ -28,9 +31,22 @@ import type {
   SnapshotNode,
 } from "../core/types";
 import type { RamImportPreview } from "../core/ramFile";
+import {
+  formatMacroSize,
+  MACRO_REPLAY_SPEEDS,
+  macroSpeedLabel,
+  type KeyMacro,
+} from "../core/macros";
 import type { EmulatorSession } from "./useEmulator";
 
-type DebugTab = "state" | "disassembly" | "breakpoints" | "memory" | "stack" | "snapshots";
+type DebugTab =
+  | "state"
+  | "disassembly"
+  | "breakpoints"
+  | "memory"
+  | "stack"
+  | "snapshots"
+  | "macros";
 
 const TABS: Array<{ id: DebugTab; label: string; icon: typeof Cpu }> = [
   { id: "state", label: "State", icon: Gauge },
@@ -39,6 +55,7 @@ const TABS: Array<{ id: DebugTab; label: string; icon: typeof Cpu }> = [
   { id: "memory", label: "Memory", icon: Database },
   { id: "stack", label: "Stack", icon: Layers },
   { id: "snapshots", label: "States", icon: Bookmark },
+  { id: "macros", label: "Macros", icon: ListChecks },
 ];
 
 function hex(value: number, width = 4) {
@@ -375,6 +392,8 @@ export function DebuggerContent({
     );
   }
 
+  if (tab === "macros") return <MacroView session={session} />;
+
   return (
     <div className="debug-pane">
       <div className="pane-toolbar">
@@ -514,6 +533,221 @@ export function DebuggerContent({
         <p className="empty-note">Snapshots capture the full machine state and stay on this device.</p>
       )}
     </div>
+  );
+}
+
+function MacroView({ session }: { session: EmulatorSession }) {
+  const [name, setName] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  return (
+    <div className="debug-pane macro-pane">
+      <div className="macro-recording-bar">
+        <div>
+          <span className={session.recording ? "macro-record-dot is-live" : "macro-record-dot"} />
+          <strong>{session.recording ? "RECORDING" : "KEY MACROS"}</strong>
+        </div>
+        {session.recording ? (
+          <button className="mini-button macro-stop" onClick={session.stopMacroRecording}>
+            <Square size={12} /> Stop recording
+          </button>
+        ) : (
+          <button
+            className="mini-button"
+            onClick={() => {
+              setMessage("");
+              setError("");
+              session.startMacroRecording();
+            }}
+            disabled={Boolean(session.replayingMacroId)}
+          >
+            <Radio size={14} /> Record
+          </button>
+        )}
+      </div>
+      {session.recording ? (
+        <p className="macro-live-status" role="status">
+          {session.recordedEvents} events · {(session.recordingElapsedMs / 1000).toFixed(1)}s
+          <span>Use calculator keys or the keyboard, then stop when finished.</span>
+        </p>
+      ) : null}
+      {session.pendingRecording ? (
+        <section className="macro-review" aria-label="Review recording">
+          <div>
+            <span>RECORDING READY</span>
+            <strong>
+              {session.pendingRecording.events.filter((event) => event.pressed).length}{" "}
+              key presses ·{" "}
+              {(
+                (session.pendingRecording.events.at(-1)?.atMs ?? 0) / 1000
+              ).toFixed(1)}
+              s
+            </strong>
+          </div>
+          <div className="macro-sequence">
+            {session.pendingRecording.events
+              .filter((event) => event.pressed)
+              .map((event, index) => (
+                <span key={`${event.kiko}-${event.atMs}-${index}`}>{event.label}</span>
+              ))}
+          </div>
+          <input
+            aria-label="Macro name"
+            placeholder="Macro name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+          <div className="macro-review-actions">
+            <button
+              className="mini-button"
+              disabled={!name.trim()}
+              onClick={async () => {
+                setMessage("");
+                setError("");
+                try {
+                  const saved = await session.saveMacroRecording(name);
+                  setName("");
+                  setMessage(`Saved “${saved.name}”.`);
+                } catch (cause) {
+                  setError(cause instanceof Error ? cause.message : String(cause));
+                }
+              }}
+            >
+              <Save size={14} /> Save macro
+            </button>
+            <button
+              className="mini-button"
+              onClick={() => {
+                session.discardMacroRecording();
+                setName("");
+              }}
+            >
+              Discard
+            </button>
+          </div>
+        </section>
+      ) : null}
+      {message ? (
+        <p className="pane-note macro-success" role="status">
+          {message}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="pane-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className="macro-speed">
+        <label htmlFor="macro-replay-speed">Replay speed</label>
+        <select
+          id="macro-replay-speed"
+          value={session.replaySpeed}
+          onChange={(event) => {
+            const value = event.target.value;
+            const speed = value === "instant" ? "instant" : Number(value) as 0.5 | 1 | 2;
+            void session.setReplaySpeed(speed);
+          }}
+        >
+          {MACRO_REPLAY_SPEEDS.map((speed) => (
+            <option key={speed} value={speed}>
+              {macroSpeedLabel(speed)}
+            </option>
+          ))}
+        </select>
+      </div>
+      {session.macros.length ? (
+        <div className="macro-list">
+          {session.macros.map((macro) => (
+            <MacroItem
+              key={macro.id}
+              macro={macro}
+              session={session}
+              onMessage={setMessage}
+              onError={setError}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="empty-note">
+          Record a short sequence of calculator keys and replay it with one click.
+          Macros stay on this device and are scoped to this model.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function MacroItem({
+  macro,
+  session,
+  onMessage,
+  onError,
+}: {
+  macro: KeyMacro;
+  session: EmulatorSession;
+  onMessage: (message: string) => void;
+  onError: (message: string) => void;
+}) {
+  const replaying = session.replayingMacroId === macro.id;
+  const progress =
+    replaying && macro.durationMs
+      ? Math.min(100, (session.replayElapsedMs / macro.durationMs) * 100)
+      : 0;
+  return (
+    <article className={`macro-item ${replaying ? "is-replaying" : ""}`}>
+      <div className="macro-item-main">
+        <strong>{macro.name}</strong>
+        <small>{formatMacroSize(macro)}</small>
+        <div className="macro-labels">
+          {macro.events
+            .filter((event) => event.pressed)
+            .slice(0, 12)
+            .map((event, index) => (
+              <span key={`${event.kiko}-${event.atMs}-${index}`}>{event.label}</span>
+            ))}
+          {macro.events.filter((event) => event.pressed).length > 12 ? (
+            <span>+{macro.events.filter((event) => event.pressed).length - 12}</span>
+          ) : null}
+        </div>
+        {replaying ? <div className="macro-progress" style={{ width: `${progress}%` }} /> : null}
+      </div>
+      <div className="macro-item-actions">
+        {replaying ? (
+          <button className="mini-button macro-stop" onClick={session.stopMacroReplay}>
+            <Square size={12} /> Stop
+          </button>
+        ) : (
+          <button
+            className="mini-button macro-play"
+            disabled={session.recording || Boolean(session.replayingMacroId)}
+            onClick={() => {
+              onError("");
+              onMessage("");
+              session.replayMacro(macro);
+            }}
+          >
+            <Play size={13} /> Replay
+          </button>
+        )}
+        <button
+          className="icon-button"
+          aria-label={`Delete ${macro.name}`}
+          disabled={replaying}
+          onClick={async () => {
+            onError("");
+            try {
+              await session.deleteMacro(macro.id);
+              onMessage(`Deleted “${macro.name}”.`);
+            } catch (cause) {
+              onError(cause instanceof Error ? cause.message : String(cause));
+            }
+          }}
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
+    </article>
   );
 }
 

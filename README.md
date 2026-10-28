@@ -15,6 +15,7 @@ files and firmware that you are legally entitled to use.
 - Registers, disassembly, breakpoints, memory inspection/editing, call stack,
   snapshots, and persistent battery-backed RAM.
 - Portable battery-backed RAM export/import with `.cewram` files.
+- Per-model key macro recording and replay with optional timing speeds.
 - SVG board, SVG interface, and bitmap interface skins.
 - Model files, RAM, and snapshots stored locally in IndexedDB.
 - No backend, ROM bundle, pthreads, `SharedArrayBuffer`, or cross-origin
@@ -93,6 +94,20 @@ model.
 `.cewram` files are specific to CasioEmuWeb. They are not raw CasioEmuMsvc
 `ram.dmp` files, and they cannot be loaded into a different model or hardware
 family. RAM files stay on your device unless you choose to move them.
+
+## Key macros
+
+Open the debugger's **Macros** tab and choose **Record**, then use either the
+on-screen calculator keys or the mapped physical keyboard. Recording captures
+calculator key labels and press/release timing, so macros still work after you
+change physical key bindings. Choose **Stop recording**, review the sequence,
+name it, and save it to the local per-model macro library.
+
+Each saved macro can be replayed from the calculator's current state. Replay
+preserves the recorded timing at `0.5x`, `1x`, or `2x`, or runs immediately with
+**Instant** speed. Stopping playback, changing models, leaving the page, or
+losing window focus cancels the sequence and releases all calculator keys.
+Macros are stored in IndexedDB and are never uploaded.
 
 ## Debug shortcuts
 

@@ -1,6 +1,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import { deserializeModelFiles, serializeModelFiles } from "./import";
 import type { KeyBindingOverrides } from "./keyBindings";
+import { normalizeMacroStore, type MacroStore } from "./macros";
 import type { ModelRecord, SnapshotNode, StoredModelRecord } from "./types";
 
 const DB_NAME = "casio-emu-web";
@@ -172,6 +173,18 @@ export async function saveKeyBindingOverrides(
   overrides: KeyBindingOverrides,
 ): Promise<void> {
   await setSetting(keyBindingSetting(modelId), overrides);
+}
+
+function macroSetting(modelId: string) {
+  return `macros:${modelId}`;
+}
+
+export async function getMacroStore(modelId: string): Promise<MacroStore> {
+  return normalizeMacroStore(await getSetting<unknown>(macroSetting(modelId), null));
+}
+
+export async function saveMacroStore(modelId: string, store: MacroStore): Promise<void> {
+  await setSetting(macroSetting(modelId), normalizeMacroStore(store));
 }
 
 export async function clearAllData(): Promise<void> {

@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RamImportPreview } from "../core/ramFile";
 import type { DebugSnapshot } from "../core/types";
+import type { KeyMacro, MacroRecording } from "../core/macros";
 import { DebuggerContent } from "./Debugger";
 import type { EmulatorSession } from "./useEmulator";
 
@@ -64,6 +65,22 @@ function session(overrides: Partial<EmulatorSession> = {}): EmulatorSession {
     downloadRam: vi.fn().mockResolvedValue(undefined),
     readRamFile: vi.fn(),
     restoreRam: vi.fn().mockResolvedValue(undefined),
+    macros: [],
+    replaySpeed: 1,
+    recording: false,
+    recordedEvents: 0,
+    recordingElapsedMs: 0,
+    pendingRecording: null,
+    replayingMacroId: null,
+    replayElapsedMs: 0,
+    startMacroRecording: vi.fn(),
+    stopMacroRecording: vi.fn(),
+    discardMacroRecording: vi.fn(),
+    saveMacroRecording: vi.fn(),
+    deleteMacro: vi.fn(),
+    setReplaySpeed: vi.fn(),
+    replayMacro: vi.fn(),
+    stopMacroReplay: vi.fn(),
     persistNow: vi.fn(),
     ...overrides,
   };
@@ -80,6 +97,25 @@ const preview: RamImportPreview = {
     exportedAt: "2026-10-28T14:30:00.000Z",
   },
   payload: new Uint8Array([1, 2, 3]),
+};
+
+const macro: KeyMacro = {
+  id: "macro-a",
+  name: "My macro",
+  createdAt: 1,
+  durationMs: 100,
+  events: [
+    { kiko: 1, label: "1", pressed: true, atMs: 0 },
+    { kiko: 1, label: "1", pressed: false, atMs: 100 },
+  ],
+};
+
+const pendingRecording: MacroRecording = {
+  startedAt: 0,
+  events: [
+    { kiko: 1, label: "1", pressed: true, atMs: 0 },
+    { kiko: 1, label: "1", pressed: false, atMs: 50 },
+  ],
 };
 
 describe("RAM file controls", () => {
@@ -162,5 +198,112 @@ describe("RAM file controls", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "different calculator hardware",
     );
+  });
+});
+
+describe("macro controls", () => {
+  it("starts recording and shows live event status", () => {
+    const startMacroRecording = vi.fn();
+    const { rerender } = render(
+      <DebuggerContent
+        tab="macros"
+        session={session({ startMacroRecording })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Record" }));
+    expect(startMacroRecording).toHaveBeenCalledOnce();
+
+    rerender(
+      <DebuggerContent
+        tab="macros"
+        session={session({
+          recording: true,
+          recordedEvents: 3,
+          recordingElapsedMs: 1200,
+        })}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("3 events");
+    expect(screen.getByRole("button", { name: "Stop recording" })).toBeInTheDocument();
+  });
+
+  it("reviews and saves a recording", async () => {
+    const saveMacroRecording = vi.fn().mockResolvedValue(macro);
+    render(
+      <DebuggerContent
+        tab="macros"
+        session={session({ pendingRecording, saveMacroRecording })}
+      />,
+    );
+
+    expect(screen.getByRole("region", { name: "Review recording" })).toHaveTextContent(
+      "1 key presses",
+    );
+    fireEvent.change(screen.getByLabelText("Macro name"), {
+      target: { value: "My macro" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save macro" }));
+    await waitFor(() =>
+      expect(saveMacroRecording).toHaveBeenCalledWith("My macro"),
+    );
+  });
+
+  it("discards a recording", () => {
+    const discardMacroRecording = vi.fn();
+    render(
+      <DebuggerContent
+        tab="macros"
+        session={session({ pendingRecording, discardMacroRecording })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(discardMacroRecording).toHaveBeenCalledOnce();
+  });
+
+  it("changes replay speed and replays a saved macro", () => {
+    const setReplaySpeed = vi.fn().mockResolvedValue(undefined);
+    const replayMacro = vi.fn();
+    render(
+      <DebuggerContent
+        tab="macros"
+        session={session({ macros: [macro], setReplaySpeed, replayMacro })}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Replay speed"), {
+      target: { value: "2" },
+    });
+    expect(setReplaySpeed).toHaveBeenCalledWith(2);
+    fireEvent.click(screen.getByRole("button", { name: "Replay" }));
+    expect(replayMacro).toHaveBeenCalledWith(macro);
+  });
+
+  it("shows playback progress and stops an active replay", () => {
+    const stopMacroReplay = vi.fn();
+    render(
+      <DebuggerContent
+        tab="macros"
+        session={session({
+          macros: [macro],
+          replayingMacroId: macro.id,
+          replayElapsedMs: 50,
+          stopMacroReplay,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(stopMacroReplay).toHaveBeenCalledOnce();
+  });
+
+  it("deletes a saved macro", async () => {
+    const deleteMacro = vi.fn().mockResolvedValue(undefined);
+    render(
+      <DebuggerContent
+        tab="macros"
+        session={session({ macros: [macro], deleteMacro })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Delete My macro" }));
+    await waitFor(() => expect(deleteMacro).toHaveBeenCalledWith(macro.id));
   });
 });

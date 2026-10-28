@@ -4,11 +4,14 @@ import {
   clearAllData,
   deletePersistentState,
   deleteSnapshot,
+  getMacroStore,
   getPersistentState,
   listSnapshots,
   savePersistentState,
+  saveMacroStore,
   saveSnapshot,
 } from "./storage";
+import type { KeyMacro } from "./macros";
 import type { SnapshotNode } from "./types";
 
 function snapshot(id: string, label: string, bytes: number[]): SnapshotNode {
@@ -78,5 +81,34 @@ describe("persistent RAM storage", () => {
 
     await deletePersistentState("model-a");
     expect(await getPersistentState("model-a")).toBeUndefined();
+  });
+});
+
+describe("macro storage", () => {
+  beforeEach(async () => {
+    await clearAllData();
+  });
+
+  it("round-trips valid macros and replay speed by model", async () => {
+    const macro: KeyMacro = {
+      id: "macro-a",
+      name: "Sequence",
+      createdAt: 1,
+      durationMs: 20,
+      events: [
+        { kiko: 1, label: "1", pressed: true, atMs: 0 },
+        { kiko: 1, label: "1", pressed: false, atMs: 20 },
+      ],
+    };
+    await saveMacroStore("model-a", { macros: [macro], replaySpeed: 2 });
+
+    expect(await getMacroStore("model-a")).toEqual({
+      macros: [macro],
+      replaySpeed: 2,
+    });
+    expect(await getMacroStore("model-b")).toEqual({
+      macros: [],
+      replaySpeed: 1,
+    });
   });
 });
